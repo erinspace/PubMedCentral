@@ -14,11 +14,11 @@ def consume(days_back=1):
     start_date = TODAY - timedelta(days_back)
     base_url = 'http://www.pubmedcentral.nih.gov/oai/oai.cgi?verb=ListRecords'
     # url = base_url + str(start_date)
-    # pmc_request = base_url + '&metadataPrefix=pmc&from={}'.format(str(TODAY))
+    pmc_request = base_url + '&metadataPrefix=pmc&from={}'.format(str(TODAY))
     oai_dc_request = base_url + '&metadataPrefix=oai_dc&from={}'.format(str(TODAY))
 
-    # print pmc_request
-    print oai_dc_request
+    print pmc_request
+    # print oai_dc_request
 
     oai_dc_namespaces = {'dc': 'http://purl.org/dc/elements/1.1/', 
                 'oai_dc': 'http://www.openarchives.org/OAI/2.0/',
@@ -30,7 +30,7 @@ def consume(days_back=1):
     ## add resumption token support
 
     print oai_records[0]
-    # print pmc_records[0]
+    print pmc_records[0]
     
     # xml_list = []
     # for record in records:
@@ -101,21 +101,3 @@ consume()
 
 # if __name__ == '__main__':
 #     print(lint(consume, normalize))
-
-
-
-
-
-## Notes
-# 25
-# 25
-# 25
-# 12
-# 87 with pmc data
-
-
-# 50 
-# 50
-# 50
-# 6
-# 156 with dc_oai data
