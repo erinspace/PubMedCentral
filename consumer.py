@@ -14,42 +14,42 @@ def consume(days_back=1):
     start_date = TODAY - timedelta(days_back)
     base_url = 'http://www.pubmedcentral.nih.gov/oai/oai.cgi?verb=ListRecords'
     # url = base_url + str(start_date)
-    pmc_request = base_url + '&metadataPrefix=pmc&from={}'.format(str(TODAY))
-    oai_dc_request = base_url + '&metadataPrefix=oai_dc&from{}'.format(str(TODAY))
+    # pmc_request = base_url + '&metadataPrefix=pmc&from={}'.format(str(TODAY))
+    oai_dc_request = base_url + '&metadataPrefix=oai_dc&from={}'.format(str(TODAY))
 
-    pmc_doc = get_xml(pmc_request)
-    pmc_record = pmc_doc.xpath('//record')
-
-    oai_doc = get_xml(oai_dc_request)
+    # print pmc_request
+    print oai_dc_request
 
     oai_dc_namespaces = {'dc': 'http://purl.org/dc/elements/1.1/', 
                 'oai_dc': 'http://www.openarchives.org/OAI/2.0/',
                 'ns0': 'http://www.openarchives.org/OAI/2.0/'}
 
 
-    oai_records = doc.xpath('//ns0:record', namespaces=namespaces)
-
+    oai_records = get_records(url=oai_dc_request, namespace=oai_dc_namespaces, record_namespace='ns0:')
+    # pmc_records = get_records(pmc_request)
     ## add resumption token support
+
+    print oai_records[0]
+    # print pmc_records[0]
     
+    # xml_list = []
+    # for record in records:
+    #     doc_id = record.xpath('ns0:header/ns0:identifier', namespaces=namespaces)[0].text
+    #     record = ElementTree.tostring(record)
+    #     record = '<?xml version="1.0" encoding="UTF-8"?>\n' + record
+    #     xml_list.append(RawDocument({
+    #                 'doc': record,
+    #                 'source': NAME,
+    #                 'doc_id': doc_id,
+    #                 'filetype': 'xml'
+    #             }))
 
-    xml_list = []
-    for record in records:
-        doc_id = record.xpath('ns0:header/ns0:identifier', namespaces=namespaces)[0].text
-        record = ElementTree.tostring(record)
-        record = '<?xml version="1.0" encoding="UTF-8"?>\n' + record
-        xml_list.append(RawDocument({
-                    'doc': record,
-                    'source': NAME,
-                    'doc_id': doc_id,
-                    'filetype': 'xml'
-                }))
-
-    return xml_list
+    # return xml_list
 
 def get_records(url, namespace=None, record_namespace=''):
     data = requests.get(url)
     doc = etree.XML(data.content)
-    record = doc.xpath('//{record_namespace}record', namespaces=namespace)
+    record = doc.xpath('//{0}record'.format(record_namespace), namespaces=namespace)
     return record
 
     ## TODO: fix if there are no records found... what would the XML look like?
