@@ -1,4 +1,5 @@
-''' Consumer for PubMed Central '''
+''' Consumer for PubMed Central
+    Takes in both metadata in dc and pmc formats '''
 
 from lxml import etree
 from datetime import date, timedelta
@@ -18,6 +19,9 @@ def consume(days_back=0):
     namespaces = {'dc': 'http://purl.org/dc/elements/1.1/', 
                 'oai_dc': 'http://www.openarchives.org/OAI/2.0/',
                 'ns0': 'http://www.openarchives.org/OAI/2.0/'}
+
+    print pmc_request
+    print oai_dc_request
 
     oai_records = get_records(oai_dc_request, namespaces)
     pmc_records = get_records(pmc_request, namespaces)
@@ -60,63 +64,89 @@ def normalize(raw_doc, timestamp):
                 'ns0': 'http://www.openarchives.org/OAI/2.0/',
                 'arch': 'http://dtd.nlm.nih.gov/2.0/xsd/archivearticle'}
 
+    ## title ##
     title = doc.xpath('//dc:title/node()', namespaces=namespaces)
     if len(title) == 0:
         title = doc.xpath('//arch:title-group/arch:article-title/node()', namespaces=namespaces)
-        print title
 
-    # import pdb; pdb.set_trace()
+    ## contributors ##
+    contributors = doc.xpath('//dc:creator/node()', namespaces=namespaces)
 
-    # print title
-    # title = doc.findall('ns0:metadata/oai_dc:dc/dc:title', namespaces=namespaces)
-
-    # contributors = doc.findall('ns0:metadata/oai_dc:dc/dc:creator', namespaces=namespaces)
-    # contributor_list = []
-    # for contributor in contributors:
-    #     contributor_list.append({'full_name': contributor.text, 'email':''})
-
-    # doc_id = doc.xpath('ns0:header/ns0:identifier', 
-    #                             namespaces=namespaces)[0].text
-
-    # ## TODO: make this an actual absttract maybe by going to the source...
-    # try: 
-    #     description = doc.xpath('ns0:metadata/oai_dc:dc/dc:description', namespaces=namespaces)[0].text
-    # except IndexError:
-    #     description = "No abstract available"
-
-    # date_created = doc.xpath('ns0:metadata/oai_dc:dc/dc:date', namespaces=namespaces)[0].text
-
-    # tags = doc.xpath('//dc:subject/node()', namespaces=namespaces)
-    try:
-        normalized_dict = {
-                
-                'title': title[0],
-
-                'contributors': [{'full_name': 'person', 'email':'email'}],
-                'properties': {},
-                'description': 'stuff',
-                'meta': {},
-                'id': 'doc_id',
-                'tags': ['some', 'tags'],
-                'source': NAME,
-                'date_created': 'date_created',
-                'timestamp': str(timestamp)
-        }
-    except IndexError:
-        normalized_dict = {
-                'title': 'error',
-                'contributors': [{'full_name': 'person', 'email':'email'}],
-                'properties': {},
-                'description': 'stuff',
-                'meta': {},
-                'id': 'doc_id',
-                'tags': ['some', 'tags'],
-                'source': NAME,
-                'date_created': 'date_created',
-                'timestamp': str(timestamp)
-        }
+    if len(contributors) == 0:
+        surname = doc.xpath('//arch:contrib/arch:name/arch:surname/node()', namespaces=namespaces)
+        given_names = doc.xpath('//arch:contrib/arch:name/arch:given-names/node()', namespaces=namespaces)
+        full_names = zip(surname, given_names)
+        contributors += [', '.join(names) for names in full_names]
         
-        print 'error in {}!!'.format(NAME)
+        email_list = []
+        email = doc.xpath('//arch:contrib/arch:email/node()', namespaces=namespaces)
+
+        if len(email) == len(contributors):
+            email_list = email
+        else:
+            email_list.append('')
+        
+        contributors = zip(contributors, email_list)
+
+    contributor_list = []
+    for contributor in contributors:
+        if type(contributor) == tuple:
+            contributor_list.append({'full_name': contributor[0], 'email':contributor[1]})
+        else:
+            contributor_list.append({'full_name': contributor, 'email':''})
+
+    ## description ##
+    description = doc.xpath('//dc:description/node()', namespaces=namespaces)
+    if len(description) == 0:
+        description = doc.xpath('//arch:abstract/arch:p/node()', namespaces=namespaces)
+
+    try:
+        description = description[0]
+    except IndexError:
+        description = 'No description available.'
+
+    ## id ##
+    id_url = ''
+    id_doi = ''
+    pmid = ''
+    identifiers = doc.xpath('//dc:identifier/node()', namespaces=namespaces)
+    if len(identifiers) > 1:
+        id_url = identifiers[1]
+        pmid = id_url[-8:]
+    if len(identifiers) == 3:
+        id_doi = identifiers[2]
+    else:
+        identifiers = doc.xpath('//arch:article-id/node()', namespaces=namespaces)
+        id_doi = doc.xpath("//arch:article-id[@pub-id-type='doi']/node()", namespaces=namespaces)
+        pmid = doc.xpath("//arch:article-id[@pub-id-type='pmid']/node()", namespaces=namespaces)
+        
+        if len(pmid) == 1:
+            pmid = pmid[0]
+            id_url = 'http://www.ncbi.nlm.nih.gov/pubmed/' + pmid
+
+        if len(id_doi) == 1:
+            id_doi = id_doi[0]
+            id_url = 'http://dx.doi.org/' + id_doi
+
+    doc_ids = {'url': id_url, 'doi': id_doi, 'service_id': pmid}
+    print doc_ids
+
+    ## tags ##
+
+    normalized_dict = { 
+        'title': title[0],
+
+        'contributors': contributor_list,
+        'properties': {},
+        'description': description,
+        'meta': {},
+        'id': doc_ids,
+        'tags': ['some', 'tags'],
+        'source': NAME,
+        'date_created': 'date_created',
+        'timestamp': str(timestamp)
+    }
+
 
     # print normalized_dict
     return NormalizedDocument(normalized_dict)
