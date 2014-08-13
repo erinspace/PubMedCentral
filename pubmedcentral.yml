@@ -1,8 +1,8 @@
 ---
 
-days: 'mon-fri'
+days: 'mon-sun'
 hour: 23
-minute: 59
+minute: 58
 
 directory: 'pubmedcentral'
 
