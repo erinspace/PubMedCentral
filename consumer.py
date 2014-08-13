@@ -4,11 +4,13 @@
 from lxml import etree
 from datetime import date, timedelta
 import requests
+import time
 from scrapi_tools import lint
 from scrapi_tools.document import RawDocument, NormalizedDocument
 
 TODAY = date.today()
 NAME = "pubmedcentral"
+
 
 def consume(days_back=0):
     start_date = TODAY - timedelta(days_back)
@@ -18,18 +20,19 @@ def consume(days_back=0):
 
     namespaces = {'dc': 'http://purl.org/dc/elements/1.1/', 
                 'oai_dc': 'http://www.openarchives.org/OAI/2.0/',
-                'ns0': 'http://www.openarchives.org/OAI/2.0/'}
-
-    print pmc_request
-    print oai_dc_request
+                'ns0': 'http://www.openarchives.org/OAI/2.0/',
+                'arch': 'http://dtd.nlm.nih.gov/2.0/xsd/archivearticle'}
 
     oai_records = get_records(oai_dc_request, namespaces)
     pmc_records = get_records(pmc_request, namespaces)
-
     records =  pmc_records + oai_records
 
     xml_list = []
     for record in records:
+        ## TODO: make lack of contributors continue the loop
+        contributors = record.xpath('//dc:creator/node()', namespaces=namespaces) or record.xpath('//arch:contrib/arch:name/arch:surname/node()', namespaces=namespaces)
+        if not contributors:
+            continue
         doc_id = record.xpath('ns0:header/ns0:identifier', namespaces=namespaces)[0].text
         record = etree.tostring(record)
         record = '<?xml version="1.0" encoding="UTF-8"?>\n' + record
@@ -41,13 +44,15 @@ def consume(days_back=0):
                 }))
     return xml_list
 
+
 def get_records(url, namespace):
     data = requests.get(url)
     doc = etree.XML(data.content)
     records = doc.xpath('//ns0:record', namespaces=namespace)
     token = doc.xpath('//ns0:resumptionToken/node()', namespaces=namespace)
 
-    if len(token) == 1: 
+    if len(token) == 1:
+        time.sleep(0.5)
         base_url = 'http://www.pubmedcentral.nih.gov/oai/oai.cgi?verb=ListRecords&resumptionToken=' 
         url = base_url + token[0]
         records += get_records(url, namespace={'ns0': 'http://www.openarchives.org/OAI/2.0/'})
@@ -65,9 +70,24 @@ def normalize(raw_doc, timestamp):
                 'arch': 'http://dtd.nlm.nih.gov/2.0/xsd/archivearticle'}
 
     ## title ##
-    title = doc.xpath('//dc:title/node()', namespaces=namespaces)
+    title = doc.xpath('//dc:title', namespaces=namespaces)
     if len(title) == 0:
         title = doc.xpath('//arch:title-group/arch:article-title/node()', namespaces=namespaces)
+        if len(title) > 1:
+            full_title = ''
+            for part in title:
+                if type(part) == etree._Element:
+                    full_title = full_title + part.text + ' '
+                else:
+                    full_title = full_title + part + ' '
+            title = full_title
+
+    if isinstance(title, list):
+        title = title[0]
+        if isinstance(title, etree._Element):
+            title = title.text
+
+    title = title.strip()
 
     ## contributors ##
     contributors = doc.xpath('//dc:creator/node()', namespaces=namespaces)
@@ -99,23 +119,28 @@ def normalize(raw_doc, timestamp):
     description = doc.xpath('//dc:description/node()', namespaces=namespaces)
     if len(description) == 0:
         description = doc.xpath('//arch:abstract/arch:p/node()', namespaces=namespaces)
-
     try:
         description = description[0]
     except IndexError:
         description = 'No description available.'
 
-    ## id ##
+    ## id ##  note - pmid is collected but not used right now
     id_url = ''
     id_doi = ''
     pmid = ''
+    service_id = doc.xpath('ns0:header/ns0:identifier/node()', namespaces=namespaces)[0]
     identifiers = doc.xpath('//dc:identifier/node()', namespaces=namespaces)
     if len(identifiers) > 1:
         id_url = identifiers[1]
-        pmid = id_url[-8:]
+        if id_url[:17] == 'http://dx.doi.org':
+            id_doi = id_url[18:]
+        else:
+            pmid = id_url[-8:]
+
     if len(identifiers) == 3:
-        id_doi = identifiers[2]
-    else:
+        id_doi = identifiers[2][18:]
+
+    elif len(identifiers) == 0:
         identifiers = doc.xpath('//arch:article-id/node()', namespaces=namespaces)
         id_doi = doc.xpath("//arch:article-id[@pub-id-type='doi']/node()", namespaces=namespaces)
         pmid = doc.xpath("//arch:article-id[@pub-id-type='pmid']/node()", namespaces=namespaces)
@@ -128,27 +153,44 @@ def normalize(raw_doc, timestamp):
             id_doi = id_doi[0]
             id_url = 'http://dx.doi.org/' + id_doi
 
-    doc_ids = {'url': id_url, 'doi': id_doi, 'service_id': pmid}
-    print doc_ids
+    doc_ids = {'url': id_url, 'doi': id_doi, 'service_id': service_id}
 
     ## tags ##
+    keywords = doc.xpath('//arch:kwd/node()', namespaces=namespaces)
+    tags = []
+    for keyword in keywords:
+        if type(keyword) == etree._Element:
+            tags.append(keyword.text)
+        elif keyword.strip() != '' and keyword != ')':
+            tags.append(keyword)
+    tags = [tag.strip().replace(' (', '') for tag in tags]
+
+    ## date created ##
+    try:
+        date_created = doc.xpath('//dc:date/node()', namespaces=namespaces)[0]
+    except IndexError:
+        date_list = doc.xpath('//arch:date[@date-type="received"]', namespaces=namespaces)
+        if len(date_list) == 0:
+            date_list = doc.xpath('//arch:pub-date[@pub-type="epub"]', namespaces=namespaces)
+        year = date_list[0].find('arch:year', namespaces=namespaces).text
+        month = date_list[0].find('arch:month', namespaces=namespaces).text.zfill(2)
+        day = date_list[0].find('arch:day', namespaces=namespaces).text.zfill(2)
+        
+        date_created = '{year}-{month}-{day}'.format(year=year, month=month, day=day)
 
     normalized_dict = { 
-        'title': title[0],
-
+        'title': title,
         'contributors': contributor_list,
         'properties': {},
         'description': description,
         'meta': {},
         'id': doc_ids,
-        'tags': ['some', 'tags'],
+        'tags': tags,
         'source': NAME,
-        'date_created': 'date_created',
+        'date_created': date_created,
         'timestamp': str(timestamp)
     }
 
-
-    # print normalized_dict
     return NormalizedDocument(normalized_dict)
 
 if __name__ == '__main__':
