@@ -115,6 +115,8 @@ def normalize(raw_doc, timestamp):
         else:
             contributor_list.append({'full_name': contributor, 'email':''})
 
+    contributor_list = contributor_list or [{'full_name': 'no contributors', 'email': ''}]
+
     ## description ##
     description = doc.xpath('//dc:description/node()', namespaces=namespaces)
     if len(description) == 0:
