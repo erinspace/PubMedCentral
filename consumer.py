@@ -42,6 +42,7 @@ def consume(days_back=0):
                     'doc_id': doc_id,
                     'filetype': 'xml'
                 }))
+
     return xml_list
 
 
@@ -154,6 +155,8 @@ def normalize(raw_doc, timestamp):
         if len(id_doi) == 1:
             id_doi = id_doi[0]
             id_url = 'http://dx.doi.org/' + id_doi
+        if id_url == '':
+            raise Exception("No url provided!")
 
     doc_ids = {'url': id_url, 'doi': id_doi, 'service_id': service_id}
 
