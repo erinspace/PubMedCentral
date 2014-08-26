@@ -85,10 +85,37 @@ def get_title(doc):
     title = title.strip()
     return title
 
+def get_properties(doc, metadata_type):
+    properties = {}
+    if metadata_type == 'oai_dc':
+        properties['type'] = (doc.xpath('//dc:type/node()', namespaces=NAMESPACES) or [''])[0]
+        properties['language'] = (doc.xpath('//dc:language/node()', namespaces=NAMESPACES) or [''])[0]
+        properties['rights'] = (doc.xpath('//dc:rights/node()', namespaces=NAMESPACES) or [''])[0]
+    elif metadata_type == 'pmc':
+        properties['journal_ids'] = doc.xpath('//arch:journal-id/node()', namespaces=NAMESPACES)
+        properties['article_ids'] = doc.xpath('//arch:article-id/node()', namespaces=NAMESPACES)
+        properties['publisher_name'] = (doc.xpath('//arch:publisher-name/node()', namespaces=NAMESPACES) or [''])[0]
+        properties['issn'] = doc.xpath('//arch:issn/node()', namespaces=NAMESPACES)
+        properties['series_title'] = (doc.xpath('//arch:series-title/node()', namespaces=NAMESPACES) or [''])[0]
+        properties['subjects'] = doc.xpath('//arch:subject/node()', namespaces=NAMESPACES)
+        affiliations = doc.xpath('//arch:aff/node()', namespaces=NAMESPACES)
+        properties['affiliations'] = [affiliate for affiliate in affiliations if type(affiliate) != etree._Element]
+        properties['copyright'] = (doc.xpath('//arch:copyright-statement/node()', namespaces=NAMESPACES) or [''])[0]
+        properties['license'] = (doc.xpath('//arch:license-p/node()', namespaces=NAMESPACES) or [''])[0]
+    return properties
 
 def normalize(raw_doc, timestamp):
     raw_doc = raw_doc.get('doc')
     doc = etree.XML(raw_doc)
+
+    metadata_type = 'oai_dc'
+
+    if doc.xpath('//dc:creator/node()', namespaces=NAMESPACES) == [] and \
+    doc.xpath('//dc:creator/node()', namespaces=NAMESPACES) == []:
+        metadata_type = 'pmc'
+
+    # properties #
+    properties = get_properties(doc, metadata_type)
 
     ## title ##
     title = get_title(doc)
@@ -189,7 +216,7 @@ def normalize(raw_doc, timestamp):
     normalized_dict = { 
         'title': title,
         'contributors': contributor_list,
-        'properties': {},
+        'properties': properties,
         'description': description,
         'meta': {},
         'id': doc_ids,
@@ -199,7 +226,7 @@ def normalize(raw_doc, timestamp):
         'timestamp': str(timestamp)
     }
 
-    # print normalized_dict
+    print normalized_dict
     return NormalizedDocument(normalized_dict)
 
 if __name__ == '__main__':
