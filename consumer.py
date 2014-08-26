@@ -24,6 +24,8 @@ def consume(days_back=0):
     pmc_request = base_url + '&metadataPrefix=pmc&from={}'.format(str(start_date))
     oai_dc_request = base_url + '&metadataPrefix=oai_dc&from={}'.format(str(start_date))
 
+    print 'pmc request: {0}\oai_dc request: {1}'.format(pmc_request, oai_dc_request)
+
     oai_records = get_records(oai_dc_request)
     pmc_records = get_records(pmc_request)
     records =  pmc_records + oai_records
@@ -197,7 +199,7 @@ def normalize(raw_doc, timestamp):
         'timestamp': str(timestamp)
     }
 
-    print normalized_dict
+    # print normalized_dict
     return NormalizedDocument(normalized_dict)
 
 if __name__ == '__main__':
