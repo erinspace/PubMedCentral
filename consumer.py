@@ -12,28 +12,30 @@ TODAY = date.today()
 NAME = "pubmedcentral"
 
 
+NAMESPACES = {'dc': 'http://purl.org/dc/elements/1.1/', 
+            'oai_dc': 'http://www.openarchives.org/OAI/2.0/',
+            'ns0': 'http://www.openarchives.org/OAI/2.0/',
+            'arch': 'http://dtd.nlm.nih.gov/2.0/xsd/archivearticle'}
+
+
 def consume(days_back=0):
     start_date = TODAY - timedelta(days_back)
     base_url = 'http://www.pubmedcentral.nih.gov/oai/oai.cgi?verb=ListRecords'
     pmc_request = base_url + '&metadataPrefix=pmc&from={}'.format(str(start_date))
     oai_dc_request = base_url + '&metadataPrefix=oai_dc&from={}'.format(str(start_date))
 
-    namespaces = {'dc': 'http://purl.org/dc/elements/1.1/', 
-                'oai_dc': 'http://www.openarchives.org/OAI/2.0/',
-                'ns0': 'http://www.openarchives.org/OAI/2.0/',
-                'arch': 'http://dtd.nlm.nih.gov/2.0/xsd/archivearticle'}
-
-    oai_records = get_records(oai_dc_request, namespaces)
-    pmc_records = get_records(pmc_request, namespaces)
+    oai_records = get_records(oai_dc_request)
+    pmc_records = get_records(pmc_request)
     records =  pmc_records + oai_records
+    print '{} records collected...'.format(len(records))
 
     xml_list = []
     for record in records:
         ## TODO: make lack of contributors continue the loop
-        contributors = record.xpath('//dc:creator/node()', namespaces=namespaces) or record.xpath('//arch:contrib/arch:name/arch:surname/node()', namespaces=namespaces)
+        contributors = record.xpath('//dc:creator/node()', namespaces=NAMESPACES) or record.xpath('//arch:contrib/arch:name/arch:surname/node()', namespaces=NAMESPACES)
         if not contributors:
             continue
-        doc_id = record.xpath('ns0:header/ns0:identifier', namespaces=namespaces)[0].text
+        doc_id = record.xpath('ns0:header/ns0:identifier/node()', namespaces=NAMESPACES)[0]
         record = etree.tostring(record)
         record = '<?xml version="1.0" encoding="UTF-8"?>\n' + record
         xml_list.append(RawDocument({
@@ -46,41 +48,31 @@ def consume(days_back=0):
     return xml_list
 
 
-def get_records(url, namespace):
+def get_records(url):
     data = requests.get(url)
     doc = etree.XML(data.content)
-    records = doc.xpath('//ns0:record', namespaces=namespace)
-    token = doc.xpath('//ns0:resumptionToken/node()', namespaces=namespace)
+    records = doc.xpath('//ns0:record', namespaces=NAMESPACES)
+    token = doc.xpath('//ns0:resumptionToken/node()', namespaces=NAMESPACES)
 
     if len(token) == 1:
         time.sleep(0.5)
         base_url = 'http://www.pubmedcentral.nih.gov/oai/oai.cgi?verb=ListRecords&resumptionToken=' 
         url = base_url + token[0]
-        records += get_records(url, namespace={'ns0': 'http://www.openarchives.org/OAI/2.0/'})
+        records += get_records(url)
 
     return records
 
-
-def normalize(raw_doc, timestamp):
-    raw_doc = raw_doc.get('doc')
-    doc = etree.XML(raw_doc)
-
-    namespaces = {'dc': 'http://purl.org/dc/elements/1.1/', 
-                'oai_dc': 'http://www.openarchives.org/OAI/2.0/oai_dc/',
-                'ns0': 'http://www.openarchives.org/OAI/2.0/',
-                'arch': 'http://dtd.nlm.nih.gov/2.0/xsd/archivearticle'}
-
-    ## title ##
-    title = doc.xpath('//dc:title', namespaces=namespaces)
+def get_title(doc):
+    title = doc.xpath('//dc:title', namespaces=NAMESPACES)
     if len(title) == 0:
-        title = doc.xpath('//arch:title-group/arch:article-title/node()', namespaces=namespaces)
+        title = doc.xpath('//arch:title-group/arch:article-title/node()', namespaces=NAMESPACES)
         if len(title) > 1:
             full_title = ''
             for part in title:
                 if type(part) == etree._Element:
-                    full_title = full_title + part.text + ' '
+                    full_title += str(part.text) + ' '
                 else:
-                    full_title = full_title + part + ' '
+                    full_title += part + ' '
             title = full_title
 
     if isinstance(title, list):
@@ -89,18 +81,27 @@ def normalize(raw_doc, timestamp):
             title = title.text
 
     title = title.strip()
+    return title
+
+
+def normalize(raw_doc, timestamp):
+    raw_doc = raw_doc.get('doc')
+    doc = etree.XML(raw_doc)
+
+    ## title ##
+    title = get_title(doc)
 
     ## contributors ##
-    contributors = doc.xpath('//dc:creator/node()', namespaces=namespaces)
+    contributors = doc.xpath('//dc:creator/node()', namespaces=NAMESPACES)
 
     if len(contributors) == 0:
-        surname = doc.xpath('//arch:contrib/arch:name/arch:surname/node()', namespaces=namespaces)
-        given_names = doc.xpath('//arch:contrib/arch:name/arch:given-names/node()', namespaces=namespaces)
+        surname = doc.xpath('//arch:contrib/arch:name/arch:surname/node()', namespaces=NAMESPACES)
+        given_names = doc.xpath('//arch:contrib/arch:name/arch:given-names/node()', namespaces=NAMESPACES)
         full_names = zip(surname, given_names)
         contributors += [', '.join(names) for names in full_names]
         
         email_list = []
-        email = doc.xpath('//arch:contrib/arch:email/node()', namespaces=namespaces)
+        email = doc.xpath('//arch:contrib/arch:email/node()', namespaces=NAMESPACES)
 
         if len(email) == len(contributors):
             email_list = email
@@ -119,9 +120,9 @@ def normalize(raw_doc, timestamp):
     contributor_list = contributor_list or [{'full_name': 'no contributors', 'email': ''}]
 
     ## description ##
-    description = doc.xpath('//dc:description/node()', namespaces=namespaces)
+    description = doc.xpath('//dc:description/node()', namespaces=NAMESPACES)
     if len(description) == 0:
-        description = doc.xpath('//arch:abstract/arch:p/node()', namespaces=namespaces)
+        description = doc.xpath('//arch:abstract/arch:p/node()', namespaces=NAMESPACES)
     try:
         description = description[0]
     except IndexError:
@@ -131,8 +132,8 @@ def normalize(raw_doc, timestamp):
     id_url = ''
     id_doi = ''
     pmid = ''
-    service_id = doc.xpath('ns0:header/ns0:identifier/node()', namespaces=namespaces)[0]
-    identifiers = doc.xpath('//dc:identifier/node()', namespaces=namespaces)
+    service_id = doc.xpath('ns0:header/ns0:identifier/node()', namespaces=NAMESPACES)[0]
+    identifiers = doc.xpath('//dc:identifier/node()', namespaces=NAMESPACES)
     if len(identifiers) > 1:
         id_url = identifiers[1]
         if id_url[:17] == 'http://dx.doi.org':
@@ -144,9 +145,9 @@ def normalize(raw_doc, timestamp):
         id_doi = identifiers[2][18:]
 
     elif len(identifiers) == 0:
-        identifiers = doc.xpath('//arch:article-id/node()', namespaces=namespaces)
-        id_doi = doc.xpath("//arch:article-id[@pub-id-type='doi']/node()", namespaces=namespaces)
-        pmid = doc.xpath("//arch:article-id[@pub-id-type='pmid']/node()", namespaces=namespaces)
+        identifiers = doc.xpath('//arch:article-id/node()', namespaces=NAMESPACES)
+        id_doi = doc.xpath("//arch:article-id[@pub-id-type='doi']/node()", namespaces=NAMESPACES)
+        pmid = doc.xpath("//arch:article-id[@pub-id-type='pmid']/node()", namespaces=NAMESPACES)
         
         if len(pmid) == 1:
             pmid = pmid[0]
@@ -161,7 +162,7 @@ def normalize(raw_doc, timestamp):
     doc_ids = {'url': id_url, 'doi': id_doi, 'service_id': service_id}
 
     ## tags ##
-    keywords = doc.xpath('//arch:kwd/node()', namespaces=namespaces)
+    keywords = doc.xpath('//arch:kwd/node()', namespaces=NAMESPACES)
     tags = []
     for keyword in keywords:
         if type(keyword) == etree._Element:
@@ -172,14 +173,14 @@ def normalize(raw_doc, timestamp):
 
     ## date created ##
     try:
-        date_created = doc.xpath('//dc:date/node()', namespaces=namespaces)[0]
+        date_created = doc.xpath('//dc:date/node()', namespaces=NAMESPACES)[0]
     except IndexError:
-        date_list = doc.xpath('//arch:date[@date-type="received"]', namespaces=namespaces)
+        date_list = doc.xpath('//arch:date[@date-type="received"]', namespaces=NAMESPACES)
         if len(date_list) == 0:
-            date_list = doc.xpath('//arch:pub-date[@pub-type="epub"]', namespaces=namespaces)
-        year = date_list[0].find('arch:year', namespaces=namespaces).text
-        month = date_list[0].find('arch:month', namespaces=namespaces).text.zfill(2)
-        day = date_list[0].find('arch:day', namespaces=namespaces).text.zfill(2)
+            date_list = doc.xpath('//arch:pub-date[@pub-type="epub"]', namespaces=NAMESPACES)
+        year = date_list[0].find('arch:year', namespaces=NAMESPACES).text
+        month = date_list[0].find('arch:month', namespaces=NAMESPACES).text.zfill(2)
+        day = date_list[0].find('arch:day', namespaces=NAMESPACES).text.zfill(2)
         
         date_created = '{year}-{month}-{day}'.format(year=year, month=month, day=day)
 
@@ -196,6 +197,7 @@ def normalize(raw_doc, timestamp):
         'timestamp': str(timestamp)
     }
 
+    print normalized_dict
     return NormalizedDocument(normalized_dict)
 
 if __name__ == '__main__':
