@@ -226,7 +226,6 @@ def normalize(raw_doc, timestamp):
         'timestamp': str(timestamp)
     }
 
-    print normalized_dict
     return NormalizedDocument(normalized_dict)
 
 if __name__ == '__main__':
